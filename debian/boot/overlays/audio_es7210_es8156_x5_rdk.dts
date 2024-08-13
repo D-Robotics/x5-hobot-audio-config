@@ -1,0 +1,83 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+  fragment@0 {
+    target-path = "/soc/a55_apb0/i2c@341c0000";
+    __overlay__ {
+      #address-cells = <1>;
+			#size-cells = <0>;
+
+      es7210_0: es7210_0@40 {
+        compatible = "MicArray_0";
+        reg = <0x40>;
+        #sound-dai-cells = <1>;
+        channels = <8>;
+        adc_dev_num = <2>;
+        status = "okay";
+      };
+
+      es7210_1@42 {
+        compatible = "MicArray_2";
+        reg = <0x42>;
+        channels = <8>;
+        adc_dev_num = <2>;
+      };
+
+      es8156: es8156@8 {
+        compatible = "everest,es8156";
+        reg = <0x8>;
+        #sound-dai-cells = <0>;
+        status = "okay";
+      };
+    };
+  };
+  fragment@1 {
+    target-path = "/soc/dsp_apb/dw_i2s1@320c0000";
+    __overlay__ {
+      status = "okay";
+      dwc-master = <1>;
+      #sound-dai-cells = <1>;
+    };
+  };
+  fragment@2 {
+    target-path = "/hobot_sound_machine";
+    __overlay__ {
+      status = "okay";
+      #address-cells = <1>;
+      #size-cells = <0>;
+      simple-audio-card,name = "duplex-audio-i2s1";
+
+      simple-audio-card,dai-link@0 {
+        link-name = "dai-link0";
+        reg = <1>;
+        format = "dsp_a";
+        mclk-fs = <64>;
+        bitclock-master = <&snd1_mm>;
+        frame-master = <&snd1_mm>;
+        snd1_mm: cpu {
+          sound-dai = <&dw_i2s1 1>;
+        };
+        codec {
+          sound-dai = <&es8156>;
+        };
+      };
+      simple-audio-card,dai-link@1 {
+        link-name = "dai-link1";
+        reg = <1>;
+        format = "dsp_a";
+        mclk-fs = <64>;
+        bitclock-master = <&snd1_m>;
+        frame-master = <&snd1_m>;
+        snd1_m: cpu {
+          sound-dai = <&dw_i2s1 1>;
+        };
+        codec {
+          sound-dai = <&es7210_0 0>;
+        };
+      };
+    };
+  };
+};
+
+

@@ -1,0 +1,7 @@
+#!/bin/bash
+
+echo "Start install hobot audio config"
+systemctl daemon-reload
+
+exit 0
+
