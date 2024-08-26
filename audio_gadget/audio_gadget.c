@@ -18,6 +18,34 @@ typedef struct
     int rewind_safeguard;
 } AudioConfig;
 
+
+int set_control_value(const char *control_name, long value) {
+    snd_mixer_t *handle;
+    snd_mixer_elem_t *elem;
+    snd_mixer_selem_id_t *sid;
+
+    snd_mixer_open(&handle, 0);
+    snd_mixer_attach(handle, "default");
+    snd_mixer_selem_register(handle, NULL, NULL);
+    snd_mixer_load(handle);
+
+    snd_mixer_selem_id_alloca(&sid);
+    snd_mixer_selem_id_set_name(sid, control_name);
+
+    elem = snd_mixer_find_selem(handle, sid);
+    if (!elem) {
+        fprintf(stderr, "Unable to find control '%s'\n", control_name);
+        snd_mixer_close(handle);
+        return -1;
+    }
+
+    snd_mixer_selem_set_playback_volume_all(elem, value);
+
+    snd_mixer_close(handle);
+
+    return 0;
+}
+
 void parseLine(char *line, AudioConfig *config)
 {
     sscanf(line, "load-module %s device=%s mmap=%d tsched=%d fragments=%d fragment_size=%d rate=%d channels=%d rewind_safeguard=%d",
@@ -140,6 +168,9 @@ void closeRecordingDevice(snd_pcm_t *capture_handle)
 int main()
 {
     const char *cur_audio_hat_path = "/etc/hobot_audio_config/cur_audio_hat";
+    const char *control_name = "ADC PGA Gain";//
+    int value_adc_pga_gain = 8;
+
     FILE *cur_audio_hat_file;
 
     // Check if the cur_audio_hat_file exists
@@ -190,7 +221,12 @@ int main()
     else
     {
         // File does not exist
-        printf("File does not exist\n");
+        printf("File does not exist , No HAT setting start!\n");
+        if (set_control_value(control_name, value_adc_pga_gain) != 0) {
+            fprintf(stderr, "Failed to set control value\n");
+            return 1;
+        }
+
         return 0;
     }
 
