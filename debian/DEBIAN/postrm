@@ -1,4 +1,4 @@
 #!/bin/bash
 
-sudo systemctl disable hobot-audio.service
+systemctl disable hobot-audio.service
 exit 0

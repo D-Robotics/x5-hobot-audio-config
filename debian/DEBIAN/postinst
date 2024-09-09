@@ -1,7 +1,6 @@
 #!/bin/bash
 
-echo "Start install hobot audio config"
-systemctl daemon-reload
+systemctl --no-reload enable hobot-audio.service
 
 exit 0
 
