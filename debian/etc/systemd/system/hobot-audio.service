@@ -2,6 +2,7 @@
 
 [Unit]
 Description=hobot-audio service
+After=hobot-modules-load.service
 
 [Service]
 Type=oneshot
