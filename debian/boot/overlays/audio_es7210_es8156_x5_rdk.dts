@@ -59,7 +59,7 @@
           sound-dai = <&dw_i2s1 1>;
         };
         codec {
-          sound-dai = <&es8156>;
+          sound-dai = <&es7210_0 0>;
         };
       };
       simple-audio-card,dai-link@1 {
@@ -73,7 +73,7 @@
           sound-dai = <&dw_i2s1 1>;
         };
         codec {
-          sound-dai = <&es7210_0 0>;
+          sound-dai = <&es8156>;
         };
       };
     };
