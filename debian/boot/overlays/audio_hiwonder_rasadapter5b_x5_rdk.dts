@@ -1,0 +1,55 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+
+  fragment@0 {
+    target-path = "/";
+    __overlay__ {
+      hiwonder_voicehat_codec: voicehat-codec {
+        #sound-dai-cells = <0>;
+        compatible = "google,voicehat";
+        pinctrl-names = "default";
+        sdmode-gpios= <&dsp_gpio_porta 9 0>;
+        status = "okay";
+      };
+    };
+  };
+
+  fragment@1 {
+    target-path = "/soc/dsp_apb/dw_i2s1@320c0000";
+    __overlay__ {
+      status = "okay";
+      dwc-master = <1>;
+      #sound-dai-cells = <1>;
+      pinctrl-0 = <&pinctrl_dsp_i2s1_hiwonder_rasadapter_5b>;
+    };
+  };
+
+  fragment@2 {
+    target-path = "/hobot_sound_machine";
+    __overlay__ {
+        status = "okay";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        simple-audio-card,name = "duplex-audio-i2s1";
+
+        simple-audio-card,dai-link@0 {
+            link-name = "dai-link0";
+            reg = <0>;
+            format = "dsp_a";
+            bitclock-master = <&snd1_mm>;
+            frame-master = <&snd1_mm>;
+            snd1_mm: cpu {
+                sound-dai = <&dw_i2s1 1>;
+            };
+            codec {
+			          sound-dai = <&hiwonder_voicehat_codec 0>;
+            };
+        };
+    };
+  };
+  
+};
+
+
