@@ -1,16 +1,19 @@
-// Copyright (c) 2024，D-Robotics.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright (c) 2024，D-Robotics.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,22 +36,41 @@ typedef struct
 } AudioConfig;
 
 
-int set_control_value(const char *control_name, long value) {
+int set_control_value(const char *control_name, long value, const char *card_name) {
     snd_mixer_t *handle;
     snd_mixer_elem_t *elem;
     snd_mixer_selem_id_t *sid;
 
-    snd_mixer_open(&handle, 0);
-    snd_mixer_attach(handle, "default");
-    snd_mixer_selem_register(handle, NULL, NULL);
-    snd_mixer_load(handle);
+    // open mixer
+    if (snd_mixer_open(&handle, 0) < 0) {
+        fprintf(stderr, "Failed to open mixer\n");
+        return -1;
+    }
+
+    if (snd_mixer_attach(handle, card_name) < 0) {
+        fprintf(stderr, "Failed to attach mixer to card %s\n", card_name);
+        snd_mixer_close(handle);
+        return -1;
+    }
+
+    if (snd_mixer_selem_register(handle, NULL, NULL) < 0) {
+        fprintf(stderr, "Failed to register mixer\n");
+        snd_mixer_close(handle);
+        return -1;
+    }
+
+    if (snd_mixer_load(handle) < 0) {
+        fprintf(stderr, "Failed to load mixer\n");
+        snd_mixer_close(handle);
+        return -1;
+    }
 
     snd_mixer_selem_id_alloca(&sid);
     snd_mixer_selem_id_set_name(sid, control_name);
 
     elem = snd_mixer_find_selem(handle, sid);
     if (!elem) {
-        fprintf(stderr, "Unable to find control '%s'\n", control_name);
+        fprintf(stderr, "Unable to find control '%s' on card %s\n", control_name, card_name);
         snd_mixer_close(handle);
         return -1;
     }
@@ -58,6 +80,22 @@ int set_control_value(const char *control_name, long value) {
     snd_mixer_close(handle);
 
     return 0;
+}
+
+int find_card_for_control(const char *control_name, long volume, char *found_card) {
+    char card_name[32];
+    int card_index = -1;
+
+    while (snd_card_next(&card_index) >= 0 && card_index >= 0) {
+        snprintf(card_name, sizeof(card_name), "hw:%d", card_index);
+
+        if (set_control_value(control_name, volume, card_name) == 0) {
+            strcpy(found_card, card_name);
+            return 0;  // find it return 0
+        }
+    }
+
+    return -1;  // not find
 }
 
 void parseLine(char *line, AudioConfig *config)
@@ -182,7 +220,9 @@ void closeRecordingDevice(snd_pcm_t *capture_handle)
 int main()
 {
     const char *cur_audio_hat_path = "/etc/hobot_audio_config/cur_audio_hat";
-    const char *control_name = "ADC PGA Gain";//
+    /*for es8326*/
+    const char *control_name = "ADC PGA Gain";
+    char detected_card[32];
     int value_adc_pga_gain = 8;
 
     FILE *cur_audio_hat_file;
@@ -236,9 +276,10 @@ int main()
     {
         // File does not exist
         printf("File does not exist , No HAT setting start!\n");
-        if (set_control_value(control_name, value_adc_pga_gain) != 0) {
-            fprintf(stderr, "Failed to set control value\n");
-            return 1;
+        if (find_card_for_control(control_name, value_adc_pga_gain, detected_card) == 0) {
+            printf("Control found on %s\n", detected_card);
+        } else {
+            printf("Control not found on any card\n");
         }
 
         return 0;
