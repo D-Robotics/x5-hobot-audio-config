@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024，D-Robotics.
+ * Copyright (c) 2024, D-Robotics.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,28 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <alsa/asoundlib.h>
-
-#define MAX_LINE_LENGTH 256
-
-typedef struct
-{
-    char module[50];
-    char device[50];
-    int mmap;
-    int tsched;
-    int fragments;
-    int fragment_size;
-    unsigned int rate;
-    unsigned int channels;
-    int rewind_safeguard;
-} AudioConfig;
-
 
 int set_control_value(const char *control_name, long value, const char *card_name) {
     snd_mixer_t *handle;
@@ -82,77 +64,18 @@ int set_control_value(const char *control_name, long value, const char *card_nam
     return 0;
 }
 
-int find_card_for_control(const char *control_name, long volume, char *found_card) {
-    char card_name[32];
-    int card_index = -1;
-
-    while (snd_card_next(&card_index) >= 0 && card_index >= 0) {
-        snprintf(card_name, sizeof(card_name), "hw:%d", card_index);
-
-        if (set_control_value(control_name, volume, card_name) == 0) {
-            strcpy(found_card, card_name);
-            return 0;  // find it return 0
-        }
-    }
-
-    return -1;  // not find
-}
-
-void parseLine(char *line, AudioConfig *config)
-{
-    sscanf(line, "load-module %s device=%s mmap=%d tsched=%d fragments=%d fragment_size=%d rate=%d channels=%d rewind_safeguard=%d",
-           config->module, config->device, &config->mmap, &config->tsched, &config->fragments, &config->fragment_size,
-           &config->rate, &config->channels, &config->rewind_safeguard);
-}
-
-void openPlaybackDevice(AudioConfig *config, snd_pcm_t **playback_handle)
-{
-    int err;
-    snd_pcm_hw_params_t *params;
-
-    printf("Opening playback device: %s\n", config->device);
-
-    err = snd_pcm_open(playback_handle, config->device, SND_PCM_STREAM_PLAYBACK, 0);
-    if (err < 0)
-    {
-        fprintf(stderr, "Error opening playback device: %s\n", snd_strerror(err));
-        exit(EXIT_FAILURE);
-    }
-
-    // Allocate hardware parameters structure
-    snd_pcm_hw_params_alloca(&params);
-
-    // Fill it in with default values
-    snd_pcm_hw_params_any(*playback_handle, params);
-
-    // Set the desired hardware parameters
-    snd_pcm_hw_params_set_access(*playback_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
-    snd_pcm_hw_params_set_format(*playback_handle, params, SND_PCM_FORMAT_S16_LE);
-    snd_pcm_hw_params_set_channels(*playback_handle, params, config->channels);
-    snd_pcm_hw_params_set_rate_near(*playback_handle, params, &config->rate, 0);
-
-    // Write the parameters to the driver
-    err = snd_pcm_hw_params(*playback_handle, params);
-    if (err < 0)
-    {
-        fprintf(stderr, "Error setting hardware parameters: %s\n", snd_strerror(err));
-        exit(EXIT_FAILURE);
-    }
-}
-
 void playBlankAudio(snd_pcm_t *playback_handle)
 {
     // Sample data: play a silent sound
-    const size_t frames = 48000; // Adjust based on your requirements
+    const size_t frames = 48000 * 0.1; // Adjust based on your requirements
     short buffer[frames * 2];    // 2 channels
+
+    memset(buffer, 0, sizeof(buffer));
 
     printf("Playing blank audio...\n");
 
     // // Write the silent sound to the PCM device
-    if (snd_pcm_writei(playback_handle, buffer, frames) < 0)
-    {
-        fprintf(stderr, "Error playing audio\n");
-    }
+    snd_pcm_writei(playback_handle, buffer, frames);
 }
 
 void closePlaybackDevice(snd_pcm_t *playback_handle)
@@ -161,54 +84,16 @@ void closePlaybackDevice(snd_pcm_t *playback_handle)
     snd_pcm_close(playback_handle);
 }
 
-void openRecordingDevice(AudioConfig *config, snd_pcm_t **capture_handle)
-{
-    int err;
-    snd_pcm_hw_params_t *params;
-
-    printf("Opening recording device: %s\n", config->device);
-
-    err = snd_pcm_open(capture_handle, config->device, SND_PCM_STREAM_CAPTURE, 0);
-    if (err < 0)
-    {
-        fprintf(stderr, "Error opening recording device: %s\n", snd_strerror(err));
-        exit(EXIT_FAILURE);
-    }
-
-    // Allocate hardware parameters structure
-    snd_pcm_hw_params_alloca(&params);
-
-    // Fill it in with default values
-    snd_pcm_hw_params_any(*capture_handle, params);
-
-    // Set the desired hardware parameters
-    snd_pcm_hw_params_set_access(*capture_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
-    snd_pcm_hw_params_set_format(*capture_handle, params, SND_PCM_FORMAT_S16_LE);
-    snd_pcm_hw_params_set_channels(*capture_handle, params, config->channels);
-    snd_pcm_hw_params_set_rate_near(*capture_handle, params, &config->rate, 0);
-
-    // Write the parameters to the driver
-    err = snd_pcm_hw_params(*capture_handle, params);
-    if (err < 0)
-    {
-        fprintf(stderr, "Error setting hardware parameters: %s\n", snd_strerror(err));
-        exit(EXIT_FAILURE);
-    }
-}
-
 void recordAudio(snd_pcm_t *capture_handle)
 {
     // Sample data: record audio but don't save it
-    const size_t frames = 1; // Adjust based on your requirements
-    short buffer[frames];    // 2 channels
+    const size_t frames = 48000 * 0.1; // Adjust based on your requirements
+    short buffer[frames*2];    // 2 channels
 
     printf("Recording audio (not saving)...\n");
 
     // Read audio from the PCM device
-    if (snd_pcm_readi(capture_handle, buffer, frames) < 0)
-    {
-        fprintf(stderr, "Error recording audio\n");
-    }
+    snd_pcm_readi(capture_handle, buffer, frames);
 }
 
 void closeRecordingDevice(snd_pcm_t *capture_handle)
@@ -219,108 +104,61 @@ void closeRecordingDevice(snd_pcm_t *capture_handle)
 
 int main()
 {
-    const char *cur_audio_hat_path = "/etc/hobot_audio_config/cur_audio_hat";
-    /*for es8326*/
+    int card = -1;
     const char *control_name = "ADC PGA Gain";
-    char detected_card[32];
     int value_adc_pga_gain = 8;
 
-    FILE *cur_audio_hat_file;
+    printf("Scanning all sound cards...\n");
 
-    // Check if the cur_audio_hat_file exists
-    if ((cur_audio_hat_file = fopen(cur_audio_hat_path, "r")) != NULL)
-    {
-        // File exists
-        fseek(cur_audio_hat_file, 0, SEEK_END);
-        long unsigned int file_size = ftell(cur_audio_hat_file);
+    while (snd_card_next(&card) >= 0 && card >= 0) {
+        char device_name[32];
+        snprintf(device_name, sizeof(device_name), "hw:%d", card);
+        printf("Card %d -> %s\n", card, device_name);
 
-        if (file_size > 0)
-        {
-            // File is not empty
-            rewind(cur_audio_hat_file);
+        if (set_control_value(control_name, value_adc_pga_gain, device_name) == 0) {
+            printf("Control found on %s\n", device_name);
+        }
 
-            // Read cur_audio_hat_file content
-            char buffer[file_size + 1];
-            if (fread(buffer, 1, file_size, cur_audio_hat_file) == file_size)
-            {
-                buffer[file_size] = '\0'; // Append null character at the end
+        snd_ctl_t *ctl;
+        char ctl_name[32];
+        snprintf(ctl_name, sizeof(ctl_name), "hw:%d", card);
+        if (snd_ctl_open(&ctl, ctl_name, 0) < 0) continue;
 
-                // Check if the cur_audio_hat_file content is "UNSET"
-                if (strcmp(buffer, "UNSET") == 0)
-                {
-                    printf("File exists and content is UNSET\n");
-                    fclose(cur_audio_hat_file);
-                    return 0;
-                }
-                else
-                {
-                    printf("File exists, not empty, and content is not UNSET\n");
-                }
+        int device = -1;
+        while (snd_ctl_pcm_next_device(ctl, &device) >= 0 && device >= 0) {
+            char pcm_name[32];
+            snprintf(pcm_name, sizeof(pcm_name), "hw:%d,%d", card, device);
+            printf("  Found PCM device: %s\n", pcm_name);
+            
+            snd_pcm_t *play_handle;
+            if (snd_pcm_open(&play_handle, pcm_name, SND_PCM_STREAM_PLAYBACK, 0) >= 0) {
+                printf("Playing test tone on %s\n", pcm_name);
+                snd_pcm_set_params(play_handle,
+                                SND_PCM_FORMAT_S24_LE,
+                                SND_PCM_ACCESS_RW_INTERLEAVED,
+                                2,
+                                48000,
+                                1,
+                                500000); // 0.5s latency
+                playBlankAudio(play_handle);
+                closePlaybackDevice(play_handle);
             }
-            else
-            {
-                fprintf(stderr, "Unable to read cur_audio_hat_file content\n");
+
+            snd_pcm_t *capture_handle;
+            if (snd_pcm_open(&capture_handle, pcm_name, SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK) >= 0) {
+                printf("Recording 1s from %s\n", pcm_name);
+                snd_pcm_set_params(capture_handle,
+                                SND_PCM_FORMAT_S24_LE,
+                                SND_PCM_ACCESS_RW_INTERLEAVED,
+                                2,
+                                48000,
+                                1,
+                                500000);
+                recordAudio(capture_handle);
+                closeRecordingDevice(capture_handle);
             }
         }
-        else
-        {
-            // File exists but is empty
-            printf("File exists but is empty\n");
-            fclose(cur_audio_hat_file);
-            return 0;
-        }
-
-        fclose(cur_audio_hat_file);
     }
-    else
-    {
-        // File does not exist
-        printf("File does not exist , No HAT setting start!\n");
-        if (find_card_for_control(control_name, value_adc_pga_gain, detected_card) == 0) {
-            printf("Control found on %s\n", detected_card);
-        } else {
-            printf("Control not found on any card\n");
-        }
-
-        return 0;
-    }
-
-    FILE *file = fopen("/etc/pulse/default.pa", "r");
-    if (file == NULL)
-    {
-        perror("Error opening file");
-        return 1;
-    }
-
-    char line[MAX_LINE_LENGTH];
-    AudioConfig playbackConfig, recordingConfig;
-    snd_pcm_t *playback_handle = NULL;
-    snd_pcm_t *capture_handle = NULL;
-
-    while (fgets(line, sizeof(line), file) != NULL)
-    {
-        if (line[0] == '#')
-        {
-            // Skip lines starting with #
-            continue;
-        }
-        if (strstr(line, "module-alsa-sink") != NULL)
-        {
-            parseLine(line, &playbackConfig);
-            openPlaybackDevice(&playbackConfig, &playback_handle);
-            playBlankAudio(playback_handle);
-            closePlaybackDevice(playback_handle);
-        }
-        if (strstr(line, "module-alsa-source") != NULL)
-        {
-            parseLine(line, &recordingConfig);
-            openRecordingDevice(&recordingConfig, &capture_handle);
-            recordAudio(capture_handle);
-            closeRecordingDevice(capture_handle);
-        }
-    }
-
-    fclose(file);
 
     return 0;
 }
