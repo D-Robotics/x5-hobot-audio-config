@@ -37,7 +37,7 @@
         simple-audio-card,dai-link@0 {
             link-name = "dai-link0";
             reg = <0>;
-            format = "dsp_a";
+            format = "i2s";
             bitclock-master = <&snd1_mm>;
             frame-master = <&snd1_mm>;
             snd1_mm: cpu {
