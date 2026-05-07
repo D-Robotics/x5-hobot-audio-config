@@ -81,6 +81,8 @@ void playBlankAudio(snd_pcm_t *playback_handle)
 void closePlaybackDevice(snd_pcm_t *playback_handle)
 {
     printf("Closing playback device...\n");
+    snd_pcm_drop(playback_handle);
+    snd_pcm_hw_free(playback_handle);
     snd_pcm_close(playback_handle);
 }
 
@@ -99,6 +101,8 @@ void recordAudio(snd_pcm_t *capture_handle)
 void closeRecordingDevice(snd_pcm_t *capture_handle)
 {
     printf("Closing recording device...\n");
+    snd_pcm_drop(capture_handle);
+    snd_pcm_hw_free(capture_handle);
     snd_pcm_close(capture_handle);
 }
 
@@ -128,36 +132,72 @@ int main()
         while (snd_ctl_pcm_next_device(ctl, &device) >= 0 && device >= 0) {
             char pcm_name[32];
             snprintf(pcm_name, sizeof(pcm_name), "hw:%d,%d", card, device);
-            printf("  Found PCM device: %s\n", pcm_name);
-            
-            snd_pcm_t *play_handle;
-            if (snd_pcm_open(&play_handle, pcm_name, SND_PCM_STREAM_PLAYBACK, 0) >= 0) {
-                printf("Playing test tone on %s\n", pcm_name);
-                snd_pcm_set_params(play_handle,
-                                SND_PCM_FORMAT_S24_LE,
-                                SND_PCM_ACCESS_RW_INTERLEAVED,
-                                2,
-                                48000,
-                                1,
-                                500000); // 0.5s latency
-                playBlankAudio(play_handle);
-                closePlaybackDevice(play_handle);
+
+            int has_playback = 0;
+            int has_capture = 0;
+            snd_pcm_info_t *pcminfo;
+            snd_pcm_info_alloca(&pcminfo);
+
+            snd_pcm_info_set_device(pcminfo, device);
+            snd_pcm_info_set_subdevice(pcminfo, 0);
+
+            snd_pcm_info_set_stream(pcminfo, SND_PCM_STREAM_PLAYBACK);
+            if (snd_ctl_pcm_info(ctl, pcminfo) >= 0)
+                has_playback = 1;
+
+            snd_pcm_info_set_stream(pcminfo, SND_PCM_STREAM_CAPTURE);
+            if (snd_ctl_pcm_info(ctl, pcminfo) >= 0)
+                has_capture = 1;
+
+            printf("Found PCM device: %s, has_playback: %d, has_capture: %d\n", pcm_name, has_playback, has_capture);
+
+            if (has_playback) {
+                snd_pcm_t *play_handle;
+                if (snd_pcm_open(&play_handle, pcm_name, SND_PCM_STREAM_PLAYBACK, 0) >= 0) {
+                    int err;
+                    printf("Playing test tone on %s\n", pcm_name);
+                    err = snd_pcm_set_params(play_handle,
+                                    SND_PCM_FORMAT_S16_LE,
+                                    SND_PCM_ACCESS_RW_INTERLEAVED,
+                                    2,
+                                    48000,
+                                    1,
+                                    50000); // 0.5s latency
+                    if (err < 0) {
+                        fprintf(stderr, "Set playback params failed on %s: %s\n",
+                                pcm_name, snd_strerror(err));
+                        closePlaybackDevice(play_handle);
+                        continue;
+                    }
+                    playBlankAudio(play_handle);
+                    closePlaybackDevice(play_handle);
+                }
             }
 
-            snd_pcm_t *capture_handle;
-            if (snd_pcm_open(&capture_handle, pcm_name, SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK) >= 0) {
-                printf("Recording 1s from %s\n", pcm_name);
-                snd_pcm_set_params(capture_handle,
-                                SND_PCM_FORMAT_S24_LE,
-                                SND_PCM_ACCESS_RW_INTERLEAVED,
-                                2,
-                                48000,
-                                1,
-                                500000);
-                recordAudio(capture_handle);
-                closeRecordingDevice(capture_handle);
+            if (has_capture) {
+                snd_pcm_t *capture_handle;
+                if (snd_pcm_open(&capture_handle, pcm_name, SND_PCM_STREAM_CAPTURE, 0) >= 0) {
+                    int err;
+                    printf("Recording 1s from %s\n", pcm_name);
+                    err = snd_pcm_set_params(capture_handle,
+                                    SND_PCM_FORMAT_S16_LE,
+                                    SND_PCM_ACCESS_RW_INTERLEAVED,
+                                    2,
+                                    48000,
+                                    1,
+                                    50000);
+                    if (err < 0) {
+                        fprintf(stderr, "Set capture params failed on %s: %s\n",
+                                pcm_name, snd_strerror(err));
+                        closeRecordingDevice(capture_handle);
+                        continue;
+                    }
+                    recordAudio(capture_handle);
+                    closeRecordingDevice(capture_handle);
+                }
             }
         }
+        snd_ctl_close(ctl);
     }
 
     return 0;
