@@ -1,8 +1,8 @@
 # Makefile template for compiling audio_gadget.c
 ifeq ($(CROSS_COMPILE),)
-CROSS_COMPILE = /opt/gcc-ubuntu-9.3.0-2020.03-x86_64-aarch64-linux-gnu/bin/aarch64-linux-gnu-
-export LD_LIBRARY_PATH=/opt/gcc-ubuntu-9.3.0-2020.03-x86_64-aarch64-linux-gnu/lib/x86_64-linux-gnu
+CROSS_COMPILE = /opt/arm-gnu-toolchain-13.2.Rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
 endif
+
 # Compiler and flags
 CC = $(CROSS_COMPILE)gcc
 CFLAGS = -Wall -Wextra -O2
@@ -10,17 +10,24 @@ CFLAGS = -Wall -Wextra -O2
 # Source file and executable name
 SRC = audio_gadget.c
 EXEC = audio_gadget
-export SYSROOT_DIR=$(realpath ../../../deploy)/rootfs
-LIB_DIR = -L../lib/ -L../lib/hbmedia -L../lib/aarch64-linux-gnu  -Wl,-rpath-link=../lib/ -L./
-INCLUDE_DIR = -I../include/iar/ -I../include/vio/ -I/opt/gcc-arm-11.2-2022.02-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc/usr/include
-LIB_DIR += -L${SYSROOT_DIR}/usr/lib/aarch64-linux-gnu -Wl,-rpath-link=${SYSROOT_DIR}/usr/lib/aarch64-linux-gnu/ --sysroot=${SYSROOT_DIR}
+
+HR_LOCAL_DIR ?= $(realpath ../../..)
+SYSROOT_DIR ?= $(HR_LOCAL_DIR)/deploy/rootfs
+SYSROOT_LIB = $(SYSROOT_DIR)/usr/lib/aarch64-linux-gnu
+
+INCLUDE_DIR = -I../include/iar/ -I../include/vio/
+SYSROOT_FLAGS = --sysroot=$(SYSROOT_DIR) -B$(SYSROOT_LIB) \
+	-isystem $(SYSROOT_DIR)/usr/include/aarch64-linux-gnu \
+	-L$(SYSROOT_LIB) -Wl,-rpath-link=$(SYSROOT_LIB)
+LIB_DIR = -L../lib/ -L../lib/hbmedia -L../lib/aarch64-linux-gnu -Wl,-rpath-link=../lib/ -L./
+
 # Libraries to link
-LIBS = -lasound
+LIBS = -lasound -lm
 
 all: $(EXEC)
 
 $(EXEC): $(SRC)
-	$(CC) $(CFLAGS) -o $@ $^ $(INCLUDE_DIR) $(LIB_DIR) $(LIBS) 
+	$(CC) $(CFLAGS) $(SYSROOT_FLAGS) -o $@ $^ $(INCLUDE_DIR) $(LIB_DIR) $(LIBS)
 
 clean:
 	rm -f $(EXEC)
