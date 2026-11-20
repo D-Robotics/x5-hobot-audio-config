@@ -1,0 +1,416 @@
+#!/bin/bash
+#
+# hobot-audio-profile - Audio Tuning Profile engine for RDK X5
+#
+# Applies per-board audio tuning profiles (mixer state, codec register
+# scripts, PulseAudio config) selected via srpi-config.
+#
+# The engine has NO knowledge of which physical sub-board is attached.
+# Board selection is stored by srpi-config in:
+#   /etc/hobot_audio_config/cur_audio_hat   (board display, informational)
+#   /etc/hobot_audio_config/cur_profile     (profile id, the apply source)
+#
+# On X5 the hardware appearance (codec modules + dtbo overlay in
+# /boot/config.txt) is owned by the legacy srpi-config path; this engine
+# owns everything AFTER the sound card shows up (control list, named-PCM
+# contract, register tuning, PA). When the engine is missing, srpi-config
+# degrades to the pure legacy path (unchanged behaviour).
+#
+# Copyright (C) 2026 Horizon Robotics / D-Robotics
+# License: GPL-2.0
+#
+
+PROFILES_DIR="/etc/hobot_audio_config/profiles"
+PROFILE_SRC="/usr/share/hobot_audio_config/profiles"
+CUR_HAT_FILE="/etc/hobot_audio_config/cur_audio_hat"
+CUR_PROFILE_FILE="/etc/hobot_audio_config/cur_profile"
+BACKUP_PA="/etc/hobot_audio_config/original_default.pa"
+BACKUP_ASOUND="/etc/hobot_audio_config/asound.conf.stock"
+# Per-profile module chain (<id>.modules); profiles shipped without one
+# fall back to the global module conf (backward compatibility).
+MODCONF_GLOBAL="/etc/hobot_audio_config/99_hobot_audio_module.conf"
+# ES7210 sysfs debug nodes are created by the codec driver at probe time
+# and the i2c bus number differs between boards, so they are discovered
+# at runtime (see find_es7210_sysfs_nodes).
+SYSFS_ES7210_CHIP0=""
+SYSFS_ES7210_CHIP1=""
+SND_CTL="/dev/snd/controlC0"
+
+# Register whitelist for PROFILE_REGS writes (via es7210 sysfs debug node).
+# - ALC sel/common/max-gain, HPF: these survive stream open or are harmless
+#   to re-write; anything outside is rejected.
+# - NEVER allow 0x00-0x0F (clock/reset chain) or 0x3D-0x3F (read-only ID).
+ALLOWED_REGS_ES7210="16 17 18 19 1a 1b 1c 1d 1e 20 21 22 23"
+
+log()  { echo "hobot-audio-profile: $*"; }
+err()  { echo "hobot-audio-profile: ERROR: $*" >&2; }
+die()  { err "$*"; exit 1; }
+
+usage() {
+	cat <<EOF
+Usage: hobot-audio-profile <command> [args]
+
+Commands:
+  list                     List available profiles
+  status                   Show current board/profile selection and state
+  validate <profile-id>    Validate a profile (config + state + regs)
+  select <profile-id>      Set current profile and apply it live
+  apply [profile-id]       Apply current (or given) profile
+  deploy <profile-id>      Set current profile without applying
+  import <file>            Validate and install a profile into $PROFILES_DIR
+  unset                    Clear selection and restore stock config
+
+Environment/overrides: none. Run as root.
+EOF
+}
+
+# ---------------------------------------------------------------- helpers
+
+wait_sound_card() {
+	local timeout="${1:-15}" waited=0
+	[ -e "$SND_CTL" ] && return 0
+	while [ $waited -lt "$timeout" ]; do
+		sleep 1; waited=$((waited + 1))
+		[ -e "$SND_CTL" ] && return 0
+	done
+	return 1
+}
+
+# Discover the es7210 sysfs debug nodes at runtime: they appear only after
+# the codec driver is probed, and the i2c bus number is board dependent.
+# shellcheck disable=SC2012  # spec-mandated glob idiom (S100 parity)
+find_es7210_sysfs_nodes() {
+	SYSFS_ES7210_CHIP0="$(ls -d /sys/bus/i2c/devices/*-0040/es7210_debug/es7210 2>/dev/null | head -1)"
+	SYSFS_ES7210_CHIP1="$(ls -d /sys/bus/i2c/devices/*-0042/es7210_debug/es7210 2>/dev/null | head -1)"
+}
+
+# Module chain for one profile: per-profile <id>.modules when present,
+# otherwise the global 99_hobot_audio_module.conf (legacy fallback).
+profile_modules_file() {
+	local id="$1"
+	local f="$PROFILES_DIR/$id.modules"
+	if [ -f "$f" ]; then
+		echo "$f"
+		return 0
+	fi
+	if [ -f "$MODCONF_GLOBAL" ]; then
+		echo "$MODCONF_GLOBAL"
+		return 0
+	fi
+	return 1
+}
+
+load_profile() {
+	local id="$1"
+	local file="$PROFILES_DIR/$id.profile"
+	[ -f "$file" ] || die "profile not found: $file"
+	# shellcheck disable=SC1090
+	. "$file"
+	[ -n "$PROFILE_ID" ] || die "$file: PROFILE_ID not set"
+	[ "$PROFILE_ID" = "$id" ] || die "$file: PROFILE_ID($PROFILE_ID) != requested($id)"
+}
+
+list_profile_ids() {
+	local f id
+	for f in "$PROFILES_DIR"/*.profile; do
+		[ -f "$f" ] || continue
+		id="$(basename "$f" .profile)"
+		unset PROFILE_DISPLAY PROFILE_ID
+		# shellcheck disable=SC1090
+		. "$f" 2>/dev/null
+		echo "$id	${PROFILE_DISPLAY:-?}"
+	done
+}
+
+# Validate one register spec: chip:reg=value (all hex, 8-bit)
+check_reg_spec() {
+	local spec="$1" chip reg val
+	chip="${spec%%:*}"
+	spec="${spec#*:}"
+	reg="${spec%%=*}"
+	val="${spec#*=}"
+	case "$chip" in 0|1) ;; *) err "reg spec '$spec': chip must be 0 or 1"; return 1 ;; esac
+	reg="${reg#0x}"; val="${val#0x}"
+	if ! [[ "$reg" =~ ^[0-9a-fA-F]{1,2}$ ]] || ! [[ "$val" =~ ^[0-9a-fA-F]{1,2}$ ]]; then
+		err "reg spec: bad reg/value: $reg=$val"; return 1
+	fi
+	reg="$(printf '%d' "0x$reg")"
+	# whitelist check (decimal compare)
+	local a
+	for a in $ALLOWED_REGS_ES7210; do
+		[ "$reg" = "$((16#$a))" ] && return 0
+	done
+	err "register 0x$(printf '%02x' "$reg") not in whitelist; allowed: $ALLOWED_REGS_ES7210"
+	return 1
+}
+
+validate_profile() {
+	local id="$1"
+	load_profile "$id"
+	find_es7210_sysfs_nodes
+	[ -n "$PROFILE_DISPLAY" ] || die "$id: PROFILE_DISPLAY not set"
+	[ -n "$PROFILE_VERSION" ] || die "$id: PROFILE_VERSION not set"
+	[ -n "$PROFILE_CTRLS" ] || die "$id: PROFILE_CTRLS not set"
+	[ -f "$PROFILES_DIR/$PROFILE_CTRLS" ] || die "$id: ctrl list missing: $PROFILE_CTRLS"
+	[ -n "$PROFILE_ASOUND" ] || die "$id: PROFILE_ASOUND not set"
+	[ -f "$PROFILES_DIR/$PROFILE_ASOUND" ] || die "$id: asound.conf missing: $PROFILE_ASOUND"
+	# named-PCM contract: never override the system default device
+	if grep -Eq 'pcm\.!default|defaults\.pcm\.' "$PROFILES_DIR/$PROFILE_ASOUND"; then
+		die "$id: asound.conf must not override pcm.!default / defaults.pcm.*"
+	fi
+	local spec
+	for spec in $PROFILE_REGS; do
+		check_reg_spec "$spec" || die "$id: invalid reg spec: $spec"
+	done
+	log "profile '$id' OK (display=\"$PROFILE_DISPLAY\" ver=$PROFILE_VERSION ctrls=$PROFILE_CTRLS asound=$PROFILE_ASOUND regs=${PROFILE_REGS:-none})"
+	return 0
+}
+
+# Write one reg via the es7210 sysfs debug node.
+# Node protocol (es7210.c es7210_store): value = (count<<16)|(reg<<8)|val, hex.
+write_es7210_reg() {
+	local chip="$1" reg="$2" val="$3" node w
+	if [ "$chip" = "0" ]; then node="$SYSFS_ES7210_CHIP0"; else node="$SYSFS_ES7210_CHIP1"; fi
+	[ -e "$node" ] || { err "sysfs node missing ($node); driver not loaded?"; return 1; }
+	w="$(printf '%05x' $(( (1 << 16) | (0x$reg << 8) | 0x$val )))"
+	echo "$w" > "$node" 2>/dev/null || { err "write failed: chip$chip 0x$reg=0x$val"; return 1; }
+	log "reg chip$chip: 0x$(printf '%02x' "0x$reg") <- 0x$(printf '%02x' "0x$val")"
+	return 0
+}
+
+# ---------------------------------------------------------------- commands
+
+cmd_list() {
+	list_profile_ids
+}
+
+cmd_status() {
+	echo "board selection : $(cat "$CUR_HAT_FILE" 2>/dev/null || echo '(none)')"
+	echo "current profile : $(cat "$CUR_PROFILE_FILE" 2>/dev/null || echo '(none)')"
+	echo "sound card      : $([ -e "$SND_CTL" ] && echo present || echo absent)"
+	echo "available profiles:"
+	list_profile_ids | sed 's/^/  /'
+}
+
+cmd_validate() {
+	[ -n "$1" ] || die "validate: missing profile id"
+	validate_profile "$1"
+}
+
+cmd_deploy() {
+	local id="$1"
+	[ -n "$id" ] || die "deploy: missing profile id"
+	validate_profile "$id"
+	# A (re)select always starts from the factory tuning of that board:
+	# refresh the writable /etc copy from /usr/share assets. Users fine-
+	# tune afterwards in /etc/hobot_audio_config/profiles or alsactl store.
+	if [ "$PROFILE_SRC" != "$PROFILES_DIR" ] && [ -f "$PROFILE_SRC/$PROFILE_CTRLS" ]; then
+		cp -f "$PROFILE_SRC/$PROFILE_CTRLS" "$PROFILES_DIR/$PROFILE_CTRLS"
+	fi
+	if [ "$PROFILE_SRC" != "$PROFILES_DIR" ] && [ -f "$PROFILE_SRC/$PROFILE_ASOUND" ]; then
+		cp -f "$PROFILE_SRC/$PROFILE_ASOUND" "$PROFILES_DIR/$PROFILE_ASOUND"
+	fi
+	mkdir -p "$(dirname "$CUR_PROFILE_FILE")"
+	echo "$id" > "$CUR_PROFILE_FILE"
+	log "deployed profile '$id'"
+	return 0
+}
+
+cmd_apply() {
+	local id="${1:-$(cat "$CUR_PROFILE_FILE" 2>/dev/null)}"
+	[ -n "$id" ] || { log "no profile selected; nothing to apply"; return 0; }
+	validate_profile "$id" || die "apply aborted: profile invalid"
+
+	if ! wait_sound_card "${APPLY_WAIT:-10}"; then
+		# card missing: load our audio module chain once, then wait again
+		local modconf
+		modconf="$(profile_modules_file "$id" || true)"
+		if [ -n "$modconf" ] && [ -f "$modconf" ]; then
+			local m loaded=0
+			while IFS= read -r m; do
+				case "$m" in ""|\#*) continue ;; esac
+				grep -qw "$m" /lib/modules/"$(uname -r)"/modules.dep 2>/dev/null || depmod -a 2>/dev/null
+				modprobe "$m" 2>/dev/null && loaded=1
+			done < "$modconf"
+			[ "$loaded" -eq 1 ] && log "audio module chain loaded from $modconf"
+		fi
+		find_es7210_sysfs_nodes
+		wait_sound_card "${APPLY_WAIT:-10}" || {
+			err "sound card controlC0 not present; is the audio driver loaded?"
+			return 1
+		}
+	fi
+
+	# 1) control list: one amixer line per control, fails loudly on drift (no rc=99)
+	local line rc_apply=0
+	while IFS= read -r line; do
+		case "$line" in ""|\#*) continue ;; esac
+		eval "$line" || { err "ctrl failed: $line"; rc_apply=1; }
+	done < "$PROFILES_DIR/$PROFILE_CTRLS"
+	[ "$rc_apply" -eq 0 ] && log "control list applied from $PROFILE_CTRLS"
+
+	# 2) named-PCM contract; stock config backed up once for unset restore.
+	# A previous profile's contract is NOT stock: a /etc/asound.conf that
+	# was installed by an earlier apply (or an older package) must never
+	# become the restore source, otherwise unset re-installs a stale
+	# contract and /etc/asound.conf can never be removed again.
+	local is_our_contract=0
+	if [ -f /etc/asound.conf ] && grep -q 'named-PCM contract' /etc/asound.conf; then
+		is_our_contract=1
+	fi
+	if [ "$is_our_contract" -eq 0 ] && [ ! -f "$BACKUP_ASOUND" ] && [ -f /etc/asound.conf ] \
+		&& ! cmp -s /etc/asound.conf "$PROFILES_DIR/$PROFILE_ASOUND"; then
+		cp -f /etc/asound.conf "$BACKUP_ASOUND"
+		log "stock /etc/asound.conf backed up"
+	fi
+	cp -f "$PROFILES_DIR/$PROFILE_ASOUND" /etc/asound.conf
+	log "named-PCM contract installed from $PROFILE_ASOUND"
+
+	# 3) register script (whitelisted, best-effort)
+	local spec chip reg val rc=0
+	for spec in $PROFILE_REGS; do
+		chip="${spec%%:*}"; spec="${spec#*:}"
+		reg="${spec%%=*}";  val="${spec#*=}"
+		reg="${reg#0x}"; val="${val#0x}"
+		write_es7210_reg "$chip" "$reg" "$val" || rc=1
+	done
+
+	# 4) pulseaudio config (guarded; headless boards may not run PA)
+	if [ -n "$PROFILE_PA" ] && [ -f "$PROFILES_DIR/$PROFILE_PA" ]; then
+		if [ ! -f "$BACKUP_PA" ]; then
+			cp -f /etc/pulse/default.pa "$BACKUP_PA" 2>/dev/null
+		fi
+		cp -f "$PROFILES_DIR/$PROFILE_PA" /etc/pulse/default.pa
+		if pgrep -x pulseaudio >/dev/null 2>&1; then
+			killall pulseaudio 2>/dev/null
+			log "pulseaudio config applied from $PROFILE_PA (PA restarted by session)"
+		else
+			log "pulseaudio config staged from $PROFILE_PA (PA not running)"
+		fi
+	fi
+
+	[ "$rc" -eq 0 ] || err "some register writes failed (see above)"
+	[ "$rc_apply" -eq 0 ] || err "some control lines failed (see above)"
+	log "profile '$id' applied"
+	return "$((rc + rc_apply))"
+}
+
+cmd_select() {
+	local id="$1"
+	[ -n "$id" ] || die "select: missing profile id"
+	cmd_deploy "$id" || return 1
+	# Select must not fail when the card is simply not probed yet;
+	# hobot-audio-profile.service applies the state at boot.
+	if ! cmd_apply "$id"; then
+		log "apply deferred to hobot-audio-profile.service (card not ready)"
+	fi
+	return 0
+}
+
+cmd_import() {
+	local src="$1"
+	[ -f "$src" ] || die "import: file not found: $src"
+	local id
+	id="$(basename "$src" .profile)"
+	# validate in a sandbox dir first
+	mkdir -p /tmp/.hap_import
+	cp -f "$src" "/tmp/.hap_import/$id.profile"
+	# accompanying assets, if referenced (PROFILE_STATE legacy-only, tolerated but not copied forward)
+	unset PROFILE_STATE PROFILE_REGS PROFILE_ID PROFILE_DISPLAY PROFILE_VERSION
+	unset PROFILE_CTRLS PROFILE_ASOUND
+	# shellcheck disable=SC1090
+	. "/tmp/.hap_import/$id.profile"
+	local asset
+	for asset in "$PROFILE_CTRLS" "$PROFILE_ASOUND"; do
+		if [ -n "$asset" ] && [ -f "$(dirname "$src")/$asset" ]; then
+			cp -f "$(dirname "$src")/$asset" "/tmp/.hap_import/$asset"
+		fi
+	done
+	local saved_dir="$PROFILES_DIR"
+	PROFILES_DIR="/tmp/.hap_import"
+	# die inside validate_profile exits the engine; make sure the sandbox
+	# dir is removed and the real profiles dir restored on that path too
+	trap 'rm -rf /tmp/.hap_import; PROFILES_DIR="'"$saved_dir"'"' EXIT
+	validate_profile "$id"; local vrc=$?
+	trap - EXIT
+	PROFILES_DIR="$saved_dir"
+	[ $vrc -eq 0 ] || { rm -rf /tmp/.hap_import; die "import: validation failed"; }
+	mkdir -p "$PROFILES_DIR"
+	cp -f "/tmp/.hap_import/$id.profile" "$PROFILES_DIR/"
+	for asset in "$PROFILE_CTRLS" "$PROFILE_ASOUND"; do
+		[ -n "$asset" ] && [ -f "/tmp/.hap_import/$asset" ] && \
+			cp -f "/tmp/.hap_import/$asset" "$PROFILES_DIR/"
+	done
+	rm -rf /tmp/.hap_import
+	log "imported profile '$id'"
+}
+
+cmd_unset() {
+	rm -f "$CUR_PROFILE_FILE" "$CUR_HAT_FILE"
+	rm -f /var/lib/alsa/asound.state
+	# restore stock named-PCM config (profile never overrode !default).
+	# Guard: a backup that is itself a profile contract is a stale artifact
+	# from the old backup rule (an earlier apply captured its own contract
+	# as "stock"); restoring it would keep a dead contract alive forever.
+	if [ -f "$BACKUP_ASOUND" ] && grep -q 'named-PCM contract' "$BACKUP_ASOUND"; then
+		rm -f "$BACKUP_ASOUND"
+		log "stale profile-contract backup discarded"
+	fi
+	if [ -f "$BACKUP_ASOUND" ]; then
+		cp -f "$BACKUP_ASOUND" /etc/asound.conf
+		rm -f "$BACKUP_ASOUND"
+		log "stock /etc/asound.conf restored"
+	else
+		rm -f /etc/asound.conf
+	fi
+	if [ -f "$BACKUP_PA" ]; then
+		cp -f "$BACKUP_PA" /etc/pulse/default.pa 2>/dev/null
+		rm -f "$BACKUP_PA"
+	fi
+	# unset must be self-sufficient: retire every per-profile module
+	# auto-load entry enrolled at deploy (srpi-config removes cur_profile
+	# before calling unset, so the retired id is derived from the
+	# installed profiles, not from the selection memory)
+	local mf base
+	for mf in "$PROFILES_DIR"/*.modules; do
+		[ -f "$mf" ] || continue
+		base="$(basename "$mf")"
+		# deployed under <id>.conf (systemd modules-load only reads
+		# *.conf); also retire any historical <id>.modules drop
+		if [ -e "/etc/modules-load.d/${base%.modules}.conf" ]; then
+			rm -f "/etc/modules-load.d/${base%.modules}.conf"
+			log "audio module auto-load retired (${base%.modules}.conf)"
+		fi
+		if [ -e "/etc/modules-load.d/$base" ]; then
+			rm -f "/etc/modules-load.d/$base"
+			log "audio module auto-load retired ($base)"
+		fi
+	done
+	if [ -e /etc/modules-load.d/99_hobot_audio_module.conf ]; then
+		rm -f /etc/modules-load.d/99_hobot_audio_module.conf
+		log "audio module auto-load retired"
+	fi
+	# restore codec blacklist so modules stay unloaded on next boot
+	if [ -e /lib/modprobe.d/blacklist-hobot-codec-es7210.disable ]; then
+		mv /lib/modprobe.d/blacklist-hobot-codec-es7210.disable \
+		   /lib/modprobe.d/blacklist-hobot-codec-es7210.conf
+		log "codec blacklist restored"
+	fi
+	# boot service no longer needed without a selection
+	systemctl disable hobot-audio-profile.service 2>/dev/null
+	log "selection cleared, stock config restored"
+}
+
+# ---------------------------------------------------------------- main
+
+case "$1" in
+	list)        shift; cmd_list "$@" ;;
+	status)      shift; cmd_status "$@" ;;
+	validate)    shift; cmd_validate "$@" ;;
+	deploy)      shift; cmd_deploy "$@" ;;
+	apply)       shift; APPLY_WAIT="${APPLY_WAIT:-10}"; cmd_apply "$@" ;;
+	select)      shift; cmd_select "$@" ;;
+	import)      shift; cmd_import "$@" ;;
+	unset)       shift; cmd_unset "$@" ;;
+	-h|--help|*) usage; { [ "$1" = "-h" ] || [ "$1" = "--help" ]; } && exit 0 || exit 1 ;;
+esac

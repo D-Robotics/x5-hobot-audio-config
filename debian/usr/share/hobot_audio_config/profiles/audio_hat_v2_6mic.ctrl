@@ -1,0 +1,57 @@
+# Audio Driver HAT V2 6-Mic ring (X5): one amixer cset name= per line, all must pass.
+#
+# Board-verified live on X5 MD + 6mic ring HAT (2026-11-19): 42/42 control
+# names exist in the CH8 kernel build (ES7210_CHANNELS_MAX=MIC_CHN_8, aligned
+# with S100); PGA1-6=14 gives six LIVE capture channels (per-channel RMS
+# 233-264 @16k/8ch, ch7/8 digital silence by design = float/ref slots).
+# Gain persistence verified through stream open/close (es7210 driver keeps
+# the userspace-owned gain nibble, S100-aligned pcm_startup/tdm cfg).
+#
+# Gain baseline: PGA1-6=14 / PGA7-8=0 mirrors S100 rdk_audio_kit_6mic_ring
+# (board-verified 2026-11-13); es8156 values from S100 waveshare_hat_v2
+# board-verified set (42/42 PASS 2026-11-16), mapped to X5 kernel-real
+# control names (DAC Playback Volume / ALC Maximum Minimum Volume / HP
+# Switch). Requires the CH8 es7210 driver (kernel patch in this tree);
+# on a CH4 kernel the ADC5-8/PGA5-8/DIRECT_5_6/7_8 lines fail loudly.
+amixer -c0 cset name='ADC12_SUSPEND' off
+amixer -c0 cset name='ADC1_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC1_MUTE' on
+amixer -c0 cset name='ADC2_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC2_MUTE' on
+amixer -c0 cset name='ADC34_SUSPEND' off
+amixer -c0 cset name='ADC3_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC3_MUTE' on
+amixer -c0 cset name='ADC4_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC4_MUTE' on
+amixer -c0 cset name='ADC56_SUSPEND' off
+amixer -c0 cset name='ADC5_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC5_MUTE' on
+amixer -c0 cset name='ADC6_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC6_MUTE' on
+amixer -c0 cset name='ADC78_SUSPEND' off
+amixer -c0 cset name='ADC7_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC7_MUTE' on
+amixer -c0 cset name='ADC8_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC8_MUTE' on
+amixer -c0 cset name='ALC Gain' 7
+amixer -c0 cset name='ALC Maximum Minimum Volume' 15,7
+amixer -c0 cset name='ALC Ramp Rate' 0
+amixer -c0 cset name='ALC Window Size' 0
+amixer -c0 cset name='Channel Select Mux' 'Left to Left, Right to Right'
+amixer -c0 cset name='DAC Automute Gate' 0
+amixer -c0 cset name='DAC Playback Volume' 190
+amixer -c0 cset name='DIRECT_1_2_GAIN_SAME_ON' off
+amixer -c0 cset name='DIRECT_3_4_GAIN_SAME_ON' off
+amixer -c0 cset name='DIRECT_5_6_GAIN_SAME_ON' off
+amixer -c0 cset name='DIRECT_7_8_GAIN_SAME_ON' off
+amixer -c0 cset name='HP Switch' on
+amixer -c0 cset name='PGA1_setting' 14
+amixer -c0 cset name='PGA2_setting' 14
+amixer -c0 cset name='PGA3_setting' 14
+amixer -c0 cset name='PGA4_setting' 14
+amixer -c0 cset name='PGA5_setting' 14
+amixer -c0 cset name='PGA6_setting' 14
+amixer -c0 cset name='PGA7_setting' 0
+amixer -c0 cset name='PGA8_setting' 0
+amixer -c0 cset name='Timer 1' 1
+amixer -c0 cset name='Timer 2' 1

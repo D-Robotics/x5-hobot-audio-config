@@ -1,4 +1,10 @@
 #!/bin/bash
 
-exit 0
+# hobot-audio-config package pre-removal
+# Symmetric cleanup for the audio tuning profile engine.
 
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    systemctl disable hobot-audio-profile.service 2>/dev/null || true
+fi
+
+exit 0

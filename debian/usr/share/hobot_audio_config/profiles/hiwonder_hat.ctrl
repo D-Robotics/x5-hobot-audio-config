@@ -1,0 +1,5 @@
+# Hiwonder Audio Driver HAT ctrl list (X5).
+# The googlevoicehat codec driver (kernel/sound/soc/codecs/
+# googlevoicehat-codec.c) declares NO snd_control / DAPM mixer widgets,
+# so there are no mixer lines to apply: this list is intentionally empty.
+# gain baseline: driver default, hw-verify pending.
