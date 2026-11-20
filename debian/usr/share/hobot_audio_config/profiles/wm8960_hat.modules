@@ -1,0 +1,6 @@
+# WM8960 Audio Driver HAT (X5) module chain.
+# Module names are the X5 codec blacklist entries verbatim:
+#   lib/modprobe.d/x5/blacklist-hobot-audio-common.conf: snd-soc-hobot-sound-machine
+#   lib/modprobe.d/x5/blacklist-hobot-codec-wm8960.conf: snd-soc-wm8960
+snd-soc-hobot-sound-machine
+snd-soc-wm8960

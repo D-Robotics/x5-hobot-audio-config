@@ -1,0 +1,21 @@
+# WM8960 Audio Driver HAT ctrl list (X5): one amixer cset name= per line.
+# Control names verified against kernel/sound/soc/codecs/wm8960.c
+# wm8960_snd_controls[]; initial values copied from the in-tree x3
+# alsactl baseline (debian/etc/hobot_audio_config/x3/wm8960_config/
+# wm8960_asound.state). gain baseline: driver default, hw-verify pending.
+# Acceptance correction 2026-11-19 (main session review): dropped
+# 'Left/Right Boost Mixer LINPUT1 Switch' - the driver only declares the
+# LINPUT1 Volume controls, no per-input Switch.
+# Syntax note: cset name= is used uniformly across ALL .ctrl assets
+# (spec x5_audio_profile_migration_spec.md section on the es8156 sset
+# blind spot); for wm8960 both forms resolve, cset keeps one convention.
+amixer -c0 cset name='Capture Switch' on,on
+amixer -c0 cset name='Capture Volume' 39,39
+amixer -c0 cset name='ADC PCM Capture Volume' 195,195
+amixer -c0 cset name='ADC High Pass Filter Switch' off
+amixer -c0 cset name='Left Input Boost Mixer LINPUT1 Volume' 3
+amixer -c0 cset name='Right Input Boost Mixer RINPUT1 Volume' 3
+amixer -c0 cset name='Playback Volume' 255,255
+amixer -c0 cset name='Headphone Playback Volume' 109,109
+amixer -c0 cset name='Speaker Playback Volume' 109,109
+amixer -c0 cset name='ALC Function' Off

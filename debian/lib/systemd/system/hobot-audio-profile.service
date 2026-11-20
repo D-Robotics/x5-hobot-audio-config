@@ -1,0 +1,18 @@
+[Unit]
+Description=Apply selected audio tuning profile
+Documentation=https://developer.d-robotics.cc/rdk_doc/rdk_x5
+ConditionPathExists=/etc/hobot_audio_config/cur_profile
+After=systemd-modules-load.service alsa-restore.service
+Before=pulseaudio.service pulseaudio.socket
+
+[Service]
+Type=oneshot
+# Board selection is made by srpi-config; this unit only applies what
+# cur_profile points to. Waiting for the sound card covers the case where
+# codec modules are modprobed slightly later than systemd-modules-load.
+ExecStart=/usr/bin/hobot-audio-profile apply
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

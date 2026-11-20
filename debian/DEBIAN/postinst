@@ -2,5 +2,60 @@
 
 systemctl --no-reload enable hobot-audio.service
 
-exit 0
+# ---- audio tuning profile engine (X5) ------------------------------------
+# Profile assets ship read-only under /usr/share/hobot_audio_config/profiles/
+# (FHS: vendor data). /etc/hobot_audio_config/profiles/ is the writable,
+# customer-tunable copy: seeded on first install only, never touched again
+# by package upgrades (dpkg overwrites plain /etc payload files on unpack,
+# which is why profiles must NOT ship under debian/etc/).
+PROFILE_SRC=/usr/share/hobot_audio_config/profiles
+PROFILE_DST=/etc/hobot_audio_config/profiles
+if [ -d "$PROFILE_SRC" ]; then
+    install -d -m 0755 "$PROFILE_DST"
+    for f in "$PROFILE_SRC"/*; do
+        [ -f "$f" ] || continue
+        base="$(basename "$f")"
+        case "$base" in
+            # .profile descriptors are engine contracts; always re-sync on upgrade
+            *.profile)
+                install -m 0644 "$f" "$PROFILE_DST/$base" ;;
+            # tuning assets are customer-tunable: seed once, never clobber
+            *)
+                if [ ! -e "$PROFILE_DST/$base" ]; then
+                    install -m 0644 "$f" "$PROFILE_DST/$base"
+                fi ;;
+        esac
+    done
+    # legacy retirement: pre-4.x versions shipped *.state snapshots, remove leftovers
+    rm -f "$PROFILE_DST"/*.state
+fi
 
+# Keep a previously selected audio board working across upgrades: if the
+# user already picked a board (cur_profile exists), mirror srpi-config and
+# retire the codec blacklist of THAT board's codec chain, so its modules
+# auto-load at boot (dpkg unpack just restored every blacklist *.conf).
+if [ -e /etc/hobot_audio_config/cur_profile ]; then
+    CUR_PROFILE="$(cat /etc/hobot_audio_config/cur_profile 2>/dev/null)"
+    case "$CUR_PROFILE" in
+        audio_hat_v1|audio_hat_v2_4mic|audio_hat_v2_6mic)
+            BLACKLIST=blacklist-hobot-codec-es7210 ;;
+        hiwonder_hat)
+            BLACKLIST=blacklist-hobot-codec-hiwonder ;;
+        wm8960_hat)
+            BLACKLIST=blacklist-hobot-codec-wm8960 ;;
+        *)
+            BLACKLIST=blacklist-hobot-codec-es7210 ;;
+    esac
+    if [ -e "/lib/modprobe.d/$BLACKLIST.conf" ]; then
+        mv "/lib/modprobe.d/$BLACKLIST.conf" "/lib/modprobe.d/$BLACKLIST.disable"
+    fi
+fi
+
+# Enable boot-time apply (one-shot; harmless if sound card never appears)
+SYSTEMD=/lib/systemd/system
+if [ -d "$SYSTEMD" ] && [ -f "$SYSTEMD/hobot-audio-profile.service" ]; then
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable hobot-audio-profile.service 2>/dev/null || true
+fi
+
+exit 0

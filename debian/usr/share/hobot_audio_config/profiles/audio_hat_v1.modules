@@ -1,0 +1,10 @@
+# Audio Driver HAT V1 (X5) module chain, read by hobot-audio-profile apply
+# when the sound card is not yet present (and copied to
+# /etc/modules-load.d/<id>.conf by srpi-config at deploy time; systemd
+# modules-load only reads *.conf).
+# Module names are the X5 codec blacklist entries verbatim:
+#   lib/modprobe.d/x5/blacklist-hobot-audio-common.conf: snd-soc-hobot-sound-machine
+#   lib/modprobe.d/x5/blacklist-hobot-codec-es7210.conf: es7210, es8156
+snd-soc-hobot-sound-machine
+es7210
+es8156

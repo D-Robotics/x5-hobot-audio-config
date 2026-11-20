@@ -1,4 +1,6 @@
 #!/bin/bash
 
 systemctl disable hobot-audio.service
+# symmetric to postinst: retire the boot-time profile applier as well
+systemctl disable hobot-audio-profile.service 2>/dev/null
 exit 0
