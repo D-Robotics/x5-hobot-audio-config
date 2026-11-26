@@ -1,0 +1,6 @@
+# Waveshare Audio Driver HAT V2 (X5) module chain; derivation: see
+# audio_hat_v1.modules (identical codec stack: snd-soc-hobot-sound-machine
+# + es7210 + es8156).
+snd-soc-hobot-sound-machine
+es7210
+es8156

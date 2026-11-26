@@ -30,6 +30,40 @@ if [ -d "$PROFILE_SRC" ]; then
     rm -f "$PROFILE_DST"/*.state
 fi
 
+# ---- legacy profile-id migration (X5 -> S100-aligned ids) ----------------
+# audio_hat_v2_4mic -> rdk_audio_kit_4mic, audio_hat_v2_6mic ->
+# rdk_audio_kit_6mic_ring. Rewrite the selection memory, carry over the
+# per-profile module auto-load entry and retire the old writable assets,
+# so boards selected before the rename keep working after the upgrade.
+CFG_DIR=/etc/hobot_audio_config
+for pair in "audio_hat_v2_4mic:rdk_audio_kit_4mic" \
+            "audio_hat_v2_6mic:rdk_audio_kit_6mic_ring"; do
+    OLD_ID="${pair%%:*}"
+    NEW_ID="${pair##*:}"
+    for mem in cur_profile cur_audio_hat; do
+        if [ -f "$CFG_DIR/$mem" ] && \
+           [ "$(cat "$CFG_DIR/$mem" 2>/dev/null)" = "$OLD_ID" ]; then
+            echo "$NEW_ID" > "$CFG_DIR/$mem"
+        fi
+    done
+    if [ -e "/etc/modules-load.d/$OLD_ID.conf" ] || \
+       [ -e "/etc/modules-load.d/$OLD_ID.modules" ]; then
+        if [ -f "$PROFILE_SRC/$NEW_ID.modules" ]; then
+            install -m 0644 "$PROFILE_SRC/$NEW_ID.modules" \
+                "/etc/modules-load.d/$NEW_ID.conf"
+        elif [ -e "/etc/modules-load.d/$OLD_ID.conf" ]; then
+            mv "/etc/modules-load.d/$OLD_ID.conf" \
+               "/etc/modules-load.d/$NEW_ID.conf"
+        fi
+        rm -f "/etc/modules-load.d/$OLD_ID.conf" \
+              "/etc/modules-load.d/$OLD_ID.modules"
+    fi
+    # old writable copies: the new-id assets were seeded above; drop the
+    # stale files so 'list' no longer shows the retired ids
+    rm -f "$PROFILE_DST/$OLD_ID.profile" "$PROFILE_DST/$OLD_ID.ctrl" \
+          "$PROFILE_DST/$OLD_ID.asound.conf" "$PROFILE_DST/$OLD_ID.modules"
+done
+
 # Keep a previously selected audio board working across upgrades: if the
 # user already picked a board (cur_profile exists), mirror srpi-config and
 # retire the codec blacklist of THAT board's codec chain, so its modules
@@ -37,7 +71,7 @@ fi
 if [ -e /etc/hobot_audio_config/cur_profile ]; then
     CUR_PROFILE="$(cat /etc/hobot_audio_config/cur_profile 2>/dev/null)"
     case "$CUR_PROFILE" in
-        audio_hat_v1|audio_hat_v2_4mic|audio_hat_v2_6mic)
+        audio_hat_v1|rdk_audio_kit_4mic|rdk_audio_kit_6mic_ring|waveshare_hat_v2)
             BLACKLIST=blacklist-hobot-codec-es7210 ;;
         hiwonder_hat)
             BLACKLIST=blacklist-hobot-codec-hiwonder ;;
