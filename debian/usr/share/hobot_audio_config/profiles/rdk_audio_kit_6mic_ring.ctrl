@@ -1,15 +1,18 @@
-# Audio Driver HAT V2 4-Mic (X5): one amixer cset name= per line, all must pass.
+# RDK Audio Kit 6-Mic (Decenta ring, X5): one amixer cset name= per line, all must pass.
 #
-# Control names identical to audio_hat_v2_6mic.ctrl (same codec stack,
-# es7210 2-chip + es8156). Difference: PGA5-8 = 0 - the S100 4mic board
-# convention (rdk_audio_kit_4mic) that pushes the gain of unpopulated
-# mic channels to zero for noise-floor control. On a 4-mic HAT the
-# second ES7210 (0x42) hosts no microphones, so its PGA gain must stay 0.
+# Board-verified live on X5 MD + Decenta 6mic ring HAT (2026-11-19): 42/42 control
+# names exist in the CH8 kernel build (ES7210_CHANNELS_MAX=MIC_CHN_8, aligned
+# with S100); PGA1-6=14 gives six LIVE capture channels (per-channel RMS
+# 233-264 @16k/8ch, ch7/8 digital silence by design = float/ref slots).
+# Gain persistence verified through stream open/close (es7210 driver keeps
+# the userspace-owned gain nibble, S100-aligned pcm_startup/tdm cfg).
 #
-# hw-verify pending on a 4-mic HAT (only the 6mic ring was board-verified
-# on X5, 2026-11-19); es8156 values from S100 waveshare_hat_v2 board set.
-# Requires the CH8 es7210 driver; on a CH4 kernel the ADC5-8/PGA5-8/
-# DIRECT_5_6/7_8 lines fail loudly.
+# Gain baseline: PGA1-6=14 / PGA7-8=0 mirrors S100 rdk_audio_kit_6mic_ring
+# (board-verified 2026-11-13); es8156 values from S100 waveshare_hat_v2
+# board-verified set (42/42 PASS 2026-11-16), mapped to X5 kernel-real
+# control names (DAC Playback Volume / ALC Maximum Minimum Volume / HP
+# Switch). Requires the CH8 es7210 driver (kernel patch in this tree);
+# on a CH4 kernel the ADC5-8/PGA5-8/DIRECT_5_6/7_8 lines fail loudly.
 amixer -c0 cset name='ADC12_SUSPEND' off
 amixer -c0 cset name='ADC1_DIRECT_GAIN' 191
 amixer -c0 cset name='ADC1_MUTE' on
@@ -46,8 +49,8 @@ amixer -c0 cset name='PGA1_setting' 14
 amixer -c0 cset name='PGA2_setting' 14
 amixer -c0 cset name='PGA3_setting' 14
 amixer -c0 cset name='PGA4_setting' 14
-amixer -c0 cset name='PGA5_setting' 0
-amixer -c0 cset name='PGA6_setting' 0
+amixer -c0 cset name='PGA5_setting' 14
+amixer -c0 cset name='PGA6_setting' 14
 amixer -c0 cset name='PGA7_setting' 0
 amixer -c0 cset name='PGA8_setting' 0
 amixer -c0 cset name='Timer 1' 1

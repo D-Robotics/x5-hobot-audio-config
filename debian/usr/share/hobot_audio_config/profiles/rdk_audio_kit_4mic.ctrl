@@ -1,0 +1,54 @@
+# RDK Audio Kit 4-Mic (Decenta, X5): one amixer cset name= per line, all must pass.
+#
+# Control names identical to rdk_audio_kit_6mic_ring.ctrl (same codec stack,
+# es7210 2-chip + es8156). Difference: PGA5-8 = 0 - the S100 4mic board
+# convention (rdk_audio_kit_4mic) that pushes the gain of unpopulated
+# mic channels to zero for noise-floor control. On the 4-mic kit the
+# second ES7210 (0x42) hosts no microphones, so its PGA gain must stay 0.
+#
+# hw-verify pending on an X5 4-mic kit (only the 6mic ring was board-verified
+# on X5, 2026-11-19); es8156 values from the S100 board-verified set.
+# Requires the CH8 es7210 driver; on a CH4 kernel the ADC5-8/PGA5-8/
+# DIRECT_5_6/7_8 lines fail loudly.
+amixer -c0 cset name='ADC12_SUSPEND' off
+amixer -c0 cset name='ADC1_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC1_MUTE' on
+amixer -c0 cset name='ADC2_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC2_MUTE' on
+amixer -c0 cset name='ADC34_SUSPEND' off
+amixer -c0 cset name='ADC3_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC3_MUTE' on
+amixer -c0 cset name='ADC4_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC4_MUTE' on
+amixer -c0 cset name='ADC56_SUSPEND' off
+amixer -c0 cset name='ADC5_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC5_MUTE' on
+amixer -c0 cset name='ADC6_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC6_MUTE' on
+amixer -c0 cset name='ADC78_SUSPEND' off
+amixer -c0 cset name='ADC7_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC7_MUTE' on
+amixer -c0 cset name='ADC8_DIRECT_GAIN' 191
+amixer -c0 cset name='ADC8_MUTE' on
+amixer -c0 cset name='ALC Gain' 7
+amixer -c0 cset name='ALC Maximum Minimum Volume' 15,7
+amixer -c0 cset name='ALC Ramp Rate' 0
+amixer -c0 cset name='ALC Window Size' 0
+amixer -c0 cset name='Channel Select Mux' 'Left to Left, Right to Right'
+amixer -c0 cset name='DAC Automute Gate' 0
+amixer -c0 cset name='DAC Playback Volume' 190
+amixer -c0 cset name='DIRECT_1_2_GAIN_SAME_ON' off
+amixer -c0 cset name='DIRECT_3_4_GAIN_SAME_ON' off
+amixer -c0 cset name='DIRECT_5_6_GAIN_SAME_ON' off
+amixer -c0 cset name='DIRECT_7_8_GAIN_SAME_ON' off
+amixer -c0 cset name='HP Switch' on
+amixer -c0 cset name='PGA1_setting' 14
+amixer -c0 cset name='PGA2_setting' 14
+amixer -c0 cset name='PGA3_setting' 14
+amixer -c0 cset name='PGA4_setting' 14
+amixer -c0 cset name='PGA5_setting' 0
+amixer -c0 cset name='PGA6_setting' 0
+amixer -c0 cset name='PGA7_setting' 0
+amixer -c0 cset name='PGA8_setting' 0
+amixer -c0 cset name='Timer 1' 1
+amixer -c0 cset name='Timer 2' 1
